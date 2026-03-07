@@ -13,12 +13,30 @@
 
 import dgram from 'dgram';
 import crypto from 'crypto';
+import os from 'os';
 import { upsertPeer, expireOldPeers } from './peers.js';
 
-export const UDP_PORT = 9000;             // Well-known LAN discovery port (fixed)
-const BROADCAST_ADDR  = '255.255.255.255';
-const ANNOUNCE_INTERVAL_MS = 3_000;
-const EXPIRE_INTERVAL_MS   = 5_000;
+export const UDP_PORT         = 9000;   // Well-known LAN discovery port (fixed)
+const ANNOUNCE_INTERVAL_MS    = 3_000;
+const EXPIRE_INTERVAL_MS      = 5_000;
+
+/**
+ * Calculate the subnet-directed broadcast address from the first non-loopback
+ * IPv4 interface (e.g. 255.255.255.0 mask on 10.74.83.72 → 10.74.83.255).
+ * Falls back to 255.255.255.255 if no interface is found.
+ */
+function getBroadcastAddress() {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        const ip   = iface.address.split('.').map(Number);
+        const mask = iface.netmask.split('.').map(Number);
+        return ip.map((octet, i) => octet | (~mask[i] & 0xff)).join('.');
+      }
+    }
+  }
+  return '255.255.255.255';
+}
 
 /**
  * Starts UDP discovery — broadcasting presence and listening for peers.
@@ -59,9 +77,10 @@ export function startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft) {
   });
 
   socket.on('listening', () => {
-    socket.setBroadcast(true);
+    // Compute broadcast address at startup (uses the first active interface)
+    const BROADCAST_ADDR = getBroadcastAddress();
 
-    // Build the announce payload once (it doesn't change)
+    socket.setBroadcast(true);
     const announcePayload = Buffer.from(JSON.stringify({
       type:   'announce',
       name:   myName,
