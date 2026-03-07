@@ -58,6 +58,7 @@ export function startDiscovery(
 
   let announceTimer = null;
   let expireTimer = null;
+  let _broadcast = null; // set when socket starts listening; used by updateFingerprint
   let currentFp = myKeyFp; // mutable — updated after key exchange
 
   // Track peers we've already sent a join-request to (avoid spam)
@@ -122,13 +123,15 @@ export function startDiscovery(
       keyFingerprint: currentFp || null,
     }));
 
-    let announcePayload = buildPayload();
-
     const broadcast = () => {
-      socket.send(announcePayload, 0, announcePayload.length, UDP_PORT, BROADCAST_ADDR);
+      // Rebuild payload each tick so keyFingerprint reflects the latest state
+      // (e.g. after creator election completes and updateFingerprint() is called)
+      const payload = buildPayload();
+      socket.send(payload, 0, payload.length, UDP_PORT, BROADCAST_ADDR);
     };
     broadcast();
     announceTimer = setInterval(broadcast, ANNOUNCE_INTERVAL_MS);
+    _broadcast = broadcast; // expose for updateFingerprint()
 
     expireTimer = setInterval(() => {
       expireOldPeers().forEach((peer) => onPeerLeft(peer));
@@ -144,9 +147,14 @@ export function startDiscovery(
       if (expireTimer) clearInterval(expireTimer);
       socket.close();
     },
-    /** Called after key exchange completes so announces include the new fingerprint. */
+    /**
+     * Called after creator election to update the fingerprint.
+     * Fires an immediate extra broadcast so joiners see the fingerprint
+     * right away without waiting up to ANNOUNCE_INTERVAL_MS.
+     */
     updateFingerprint(fp) {
       currentFp = fp;
+      if (_broadcast) _broadcast();
     },
   };
 }
