@@ -9,7 +9,7 @@ No server. No account. Just open a terminal and start chatting.
 
 ```bash
 npm install
-node src/index.js --name YourName
+npm run start:name YourName
 ```
 
 Everyone on the same WiFi runs the same command — peers appear **automatically** within a few seconds.
@@ -18,12 +18,23 @@ Everyone on the same WiFi runs the same command — peers appear **automatically
 
 ## Usage
 
+You can easily start the app with your chosen name using the `start:name` command:
 ```bash
-node src/index.js --name Alice
-# Same-machine testing (two terminals):
-node src/index.js --name Alice
-node src/index.js --name Bob --port 9002
+npm run start:name YourName
+
+# or manually using node:
+node src/index.js --name YourName
 ```
+
+### Predefined Profiles (NPM Scripts)
+For quick testing or just for fun, try out the predefined profiles included in `package.json`:
+
+| Command | Description |
+|---|---|
+| `npm run start:alice` | Starts the chat as **Alice** on the default port (`9001`) |
+| `npm run start:bob` | Starts the chat as **Bob** on port `9002` (perfect for local same-machine testing alongside Alice) |
+| `npm run matrix` | Enter the Matrix as **Neo** 💊 |
+| `npm run ghost` | Haunt the chat as **Ghost** 👻 |
 
 ### Commands
 
@@ -59,6 +70,15 @@ node src/index.js --name Bob --port 9002
 |---|---|---|
 | `9000` | UDP | Discovery broadcasts (fixed) |
 | `9001` | TCP | Chat messages (configurable via `--port`) |
+
+---
+
+## Recent Updates
+
+- **Predefined Profiles (NPM Scripts):** Added playful and convenient run scripts for quick testing (`npm run matrix`, `npm run start:bob`, etc.).
+- **TCP Fallback Discovery:** Peers can now automatically discover each other via incoming direct TCP connections if UDP broadcasts are dropped by the network (e.g., strict firewalls or AP isolation).
+- **Graceful Termination Fixes:** Fixed an issue where the discovery service wasn't properly shutting down on `/quit` or `Ctrl+C` (`discovery is not defined` error).
+- **Stability Improvements:** Resolved server-side reference errors that occurred when UDP failed and the TCP stream attempted to backfill the peer configuration.
 
 ---
 
