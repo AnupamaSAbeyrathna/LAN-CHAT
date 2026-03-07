@@ -13,8 +13,8 @@
 import chalk from 'chalk';
 
 // ── Internal state ────────────────────────────────────────────────────────────
-let _rl         = null;   // set via init()
-let _peerCount  = 0;
+let _rl = null;   // set via init()
+let _peerCount = 0;
 
 // ── Peer color palette ────────────────────────────────────────────────────────
 // Each peer gets a deterministic color based on their name hash.
@@ -67,8 +67,8 @@ function print(line) {
  * Render a message received from another peer.
  */
 export function printMessage(from, text) {
-  const time   = chalk.dim(`[${new Date().toLocaleTimeString()}]`);
-  const color  = peerColor(from);
+  const time = chalk.dim(`[${new Date().toLocaleTimeString()}]`);
+  const color = peerColor(from);
   const sender = color.bold(from);
   print(`${time} ${sender}: ${chalk.white(text)}`);
 }
@@ -79,7 +79,7 @@ export function printMessage(from, text) {
  * @param {string} target - Display target: 'All' or a peer name
  */
 export function printOwnMessage(text, target = 'All') {
-  const time  = chalk.dim(`[${new Date().toLocaleTimeString()}]`);
+  const time = chalk.dim(`[${new Date().toLocaleTimeString()}]`);
   const label = chalk.dim(`You → ${target}`);
   print(`${time} ${label}: ${chalk.dim(text)}`);
 }
@@ -91,8 +91,8 @@ export function printOwnMessage(text, target = 'All') {
  */
 export function printSystem(msg, level = 'info') {
   const icon = level === 'error' ? chalk.red('✖') :
-               level === 'warn'  ? chalk.yellow('⚠') :
-                                   chalk.dim('◆');
+    level === 'warn' ? chalk.yellow('⚠') :
+      chalk.dim('◆');
   print(`${icon} ${chalk.dim(msg)}`);
 }
 
@@ -101,7 +101,7 @@ export function printSystem(msg, level = 'info') {
  */
 export function printPeerEvent(name, event) {
   const color = peerColor(name);
-  const verb  = event === 'join'
+  const verb = event === 'join'
     ? chalk.green('joined the chat')
     : chalk.yellow('left the chat');
   const divider = chalk.dim('─'.repeat(36));
@@ -122,9 +122,9 @@ export function printPeerList(peers) {
   console.log(chalk.dim('  ' + '─'.repeat(40)));
   for (const p of peers) {
     const color = peerColor(p.name);
-    const name  = color.bold(p.name.padEnd(16));
-    const addr  = chalk.dim(`${p.ip}:${p.port}`);
-    const dot   = chalk.green('●');
+    const name = color.bold(p.name.padEnd(16));
+    const addr = chalk.dim(`${p.ip}:${p.port}`);
+    const dot = chalk.green('●');
     console.log(`  ${dot} ${name} ${addr}`);
   }
   console.log('');
@@ -138,11 +138,11 @@ export function printHelp() {
   console.log(`  ${chalk.bold('Commands')}`);
   console.log(chalk.dim('  ' + '─'.repeat(40)));
   const cmds = [
-    ['/list',               'Show all online peers'],
-    ['/msg <name> <text>',  'Send a direct message to a peer'],
-    ['/help',               'Show this help text'],
-    ['/quit',               'Exit gracefully (notifies peers)'],
-    ['<text>',              'Broadcast to all online peers'],
+    ['/list', 'Show all online peers'],
+    ['/msg <name> <text>', 'Send a direct message to a peer'],
+    ['/help', 'Show this help text'],
+    ['/quit', 'Exit gracefully (notifies peers)'],
+    ['<text>', 'Broadcast to all online peers'],
   ];
   for (const [cmd, desc] of cmds) {
     console.log(`  ${chalk.cyan(cmd.padEnd(22))} ${chalk.dim(desc)}`);
@@ -175,7 +175,7 @@ export function updatePrompt(peerCount) {
 }
 
 // ── Banner ────────────────────────────────────────────────────────────────────
-export function printBanner(myName, myIP, myTcpPort) {
+export function printBanner(myName, myIP, myTcpPort, myRoom) {
   const nameColor = peerColor(myName);
   console.log('');
   console.log(chalk.bold.hex('#B8A9FF')('  ╔══════════════════════════════════════╗'));
@@ -183,6 +183,7 @@ export function printBanner(myName, myIP, myTcpPort) {
   console.log(chalk.bold.hex('#B8A9FF')('  ╚══════════════════════════════════════╝'));
   console.log('');
   console.log(`  ${chalk.dim('You are')}  ${nameColor.bold(myName)}`);
+  console.log(`  ${chalk.dim('Room:')}    ${chalk.cyan(`#${myRoom}`)}`);
   console.log(`  ${chalk.dim('IP:')}      ${chalk.white(myIP)} ${chalk.dim(`:${myTcpPort}`)}`);
   console.log(`  ${chalk.dim('Status:')}  ${chalk.green('●')} ${chalk.green('Auto-discovery active')}`);
   console.log('');
