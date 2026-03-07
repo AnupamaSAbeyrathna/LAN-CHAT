@@ -39,6 +39,7 @@ function getBroadcastAddress() {
 }
 
 /**
+<<<<<<< HEAD
  * Starts UDP discovery — broadcasting presence and listening for peers.
  *
  * @param {string}   myName       - Local user's display name
@@ -49,6 +50,32 @@ function getBroadcastAddress() {
  */
 export function startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft) {
   // Unique ID for this instance — used to filter out our own reflected broadcasts
+=======
+ * @param {string}   myName          - Display name
+ * @param {number}   myTcpPort       - TCP port
+ * @param {string}   myRoom          - Room name (lowercase)
+ * @param {string}   myKeyFp         - Fingerprint of the room key ("" if joiner has no key yet)
+ * @param {function} onPeerJoined    - (peer) → void
+ * @param {function} onPeerLeft      - (peer) → void
+ * @param {function} onJoinRequestNeeded - (ip, port) → void  — called when we see a
+ *                                         room announce but have no key yet, so we need
+ *                                         to send a join-request to that creator
+ * @param {function} onCreatorConflict   - (ip, port) → void  — called when BOTH sides
+ *                                         self-elected as creator (simultaneous start).
+ *                                         The lower nodeId yields and calls this.
+ * @returns {{ socket, stop, updateFingerprint }}
+ */
+export function startDiscovery(
+  myName,
+  myTcpPort,
+  myRoom,
+  myKeyFp,
+  onPeerJoined,
+  onPeerLeft,
+  onJoinRequestNeeded = () => { },
+  onCreatorConflict = () => { },
+) {
+>>>>>>> c94564b (Update discovery and index)
   const myNodeId = crypto.randomBytes(8).toString('hex');
 
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -72,11 +99,58 @@ export function startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft) {
         // Ignore our own reflected broadcast
         if (packet.nodeId === myNodeId) return;
 
+<<<<<<< HEAD
         const isNew = upsertPeer(rinfo.address, packet.port, packet.name);
         if (isNew) {
           onPeerJoined({ ip: rinfo.address, port: packet.port, name: packet.name });
+=======
+      // Room filter — only register peers in the same room
+      const room = (packet.room || 'general').toLowerCase();
+      if (room !== myRoom) return;
+
+      const ip = rinfo.address;
+      const port = packet.port;
+
+      // Key fingerprint logic:
+      //   - If the remote has a fingerprint and WE don't have a key yet → send join-request
+      //   - If the remote has no fingerprint → legacy / unencrypted peer (accept normally)
+      //   - If BOTH have different fingerprints → dual-creator conflict; lower nodeId yields
+      if (packet.keyFingerprint && !currentFp) {
+        const reqKey = `${ip}:${port}`;
+        if (!joinRequested.has(reqKey)) {
+          joinRequested.add(reqKey);
+          onJoinRequestNeeded(ip, port);
+>>>>>>> c94564b (Update discovery and index)
         }
       }
+<<<<<<< HEAD
+=======
+
+      // Dual-creator conflict: both nodes self-elected simultaneously.
+      // Tiebreak deterministically: lower nodeId yields to avoid both sides retrying.
+      if (
+        packet.keyFingerprint &&
+        currentFp &&
+        packet.keyFingerprint !== currentFp &&
+        packet.nodeId
+      ) {
+        if (myNodeId < packet.nodeId) {
+          // We lose the tiebreak — drop our self-generated key and request the winner's
+          const reqKey = `${ip}:${port}`;
+          if (!joinRequested.has(reqKey)) {
+            joinRequested.add(reqKey);
+            currentFp = null; // clear so future announces don't re-trigger conflict
+            onCreatorConflict(ip, port);
+          }
+        }
+        // The winner (higher nodeId) does nothing — it stays as creator
+        return;
+      }
+
+      const isNew = upsertPeer(ip, port, name);
+      if (isNew) onPeerJoined({ ip, port, name });
+
+>>>>>>> c94564b (Update discovery and index)
     } catch {
       // Drop malformed UDP packets silently
     }

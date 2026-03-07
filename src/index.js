@@ -61,6 +61,28 @@ function getLocalIP() {
 
 const myIP = getLocalIP();
 
+<<<<<<< HEAD
+=======
+// ── Crypto state ──────────────────────────────────────────────────────────────
+let roomKey = null;     // Buffer | null
+let isCreator = false;
+let hasSentMessage = false; // true once we've encrypted+sent at least one message
+
+function activateKey(key) {
+  roomKey = key;
+  senderSetKey(key);
+  serverSetKey(key, decrypt);
+  ui.setEncrypted(true);
+  discovery.updateFingerprint(fingerprint(roomKey));
+  ui.printSystem(`🔒 E2E encryption active (key fingerprint: ${fingerprint(key)})`, 'info');
+}
+
+// ── Room name validation ───────────────────────────────────────────────────────
+function isValidRoom(r) {
+  return r.length >= 1 && r.length <= 32 && /^[\w-]+$/.test(r);
+}
+
+>>>>>>> c94564b (Update discovery and index)
 // ── Tab completer ─────────────────────────────────────────────────────────────
 const BASE_COMMANDS = ['/list', '/msg ', '/help', '/quit'];
 
@@ -109,6 +131,102 @@ function onPeerSeen(ip, port, name) {
   if (isNew) onPeerJoined({ ip, port, name });
 }
 
+<<<<<<< HEAD
+=======
+// ── Key exchange (creator side) ───────────────────────────────────────────────
+async function onJoinRequest(ip, port, name) {
+  ui.printJoinRequest(name, ip, port);
+
+  // Read a single character answer from stdin
+  const answer = await new Promise((resolve) => {
+    rl.once('line', (line) => resolve(line.trim().toLowerCase()));
+  });
+
+  if (answer === 'y' || answer === 'yes') {
+    try {
+      await sendKeyGrant(ip, port, roomKey);
+      // Now register them as a full peer
+      const isNew = upsertPeer(ip, port, name);
+      if (isNew) onPeerJoined({ ip, port, name });
+      ui.printSystem(`✓ ${name} joined the room`, 'info');
+    } catch (err) {
+      ui.printSystem(`Failed to send key to ${name}: ${err.message}`, 'error');
+    }
+  } else {
+    ui.printSystem(`${name}'s join request denied.`, 'warn');
+  }
+  ui.updatePrompt(getAllPeers().length);
+}
+
+// ── Key exchange (joiner side) — called when onKeyGrant received ──────────────
+function onKeyGrant(hexKey) {
+  // If we self-elected as creator AND have already sent encrypted messages,
+  // we can't safely re-key mid-session — ignore the late grant.
+  if (isCreator && roomKey && hasSentMessage) return;
+
+  // If we self-elected but haven't sent anything yet, the self-generated key
+  // was never shared with anyone — safe to replace it with the real creator's key.
+  if (isCreator && roomKey && !hasSentMessage) {
+    ui.printSystem('⚠ Late key-grant received — upgrading to creator\'s key.', 'warn');
+  }
+
+  const key = hexToKey(hexKey);
+  roomKey = key;
+  isCreator = false;
+  activateKey(key);
+  ui.printSystem('🔒 Key received — E2E encryption active!', 'info');
+  ui.updatePrompt(getAllPeers().length);
+}
+
+// ── Joiner sees existing creator in discovery → send join-request ─────────────
+async function onJoinRequestNeeded(ip, port) {
+  // Mark as joiner immediately so we don't race-generate a key
+  isCreator = false;
+
+  try {
+    await sendJoinRequest(ip, port, myName, myTcpPort);
+    ui.printSystem(`Join request sent — waiting for approval...`, 'info');
+  } catch {
+    ui.printSystem(`Could not reach room creator at ${ip}:${port}`, 'warn');
+  }
+}
+
+// ── Dual-creator conflict: we lost the nodeId tiebreak — yield to the winner ─────
+async function onCreatorConflict(ip, port) {
+  if (hasSentMessage) {
+    // We've already sent encrypted messages with our key — can't safely re-key.
+    // Log a warning and stay put; the other side will also stay as creator.
+    ui.printSystem('⚠ Creator conflict detected but messages already sent — staying as creator.', 'warn');
+    return;
+  }
+
+  ui.printSystem(`⚠ Simultaneous start detected — yielding creator role, requesting key...`, 'warn');
+
+  // Reset crypto state: clear our self-generated key from all modules
+  roomKey = null;
+  isCreator = false;
+  senderSetKey(null);
+  serverSetKey(null, null);
+  ui.setEncrypted(false);
+  discovery.updateFingerprint(null);
+
+  // Now send a join-request to the true creator
+  try {
+    await sendJoinRequest(ip, port, myName, myTcpPort);
+    ui.printSystem(`Join request sent — waiting for approval...`, 'info');
+  } catch {
+    ui.printSystem(`Could not reach room creator at ${ip}:${port}`, 'warn');
+  }
+}
+
+// ── Nuke handler ──────────────────────────────────────────────────────────────
+async function onNuke(from) {
+  ui.printNukeWarning(from);
+  await new Promise((r) => setTimeout(r, 2000));
+  await quit(false);
+}
+
+>>>>>>> c94564b (Update discovery and index)
 // ── Graceful exit ─────────────────────────────────────────────────────────────
 async function quit() {
   ui.printSystem('Notifying peers and exiting...');
@@ -129,9 +247,42 @@ rl.on('SIGINT', quit);
 startServer(myTcpPort, onPeerLeft, onPeerSeen);
 const discovery = startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft);
 
+<<<<<<< HEAD
 // ── Banner + initial prompt ───────────────────────────────────────────────────
 ui.printBanner(myName, myIP, myTcpPort);
 ui.updatePrompt(0);
+=======
+const discovery = startDiscovery(
+  myName, myTcpPort, myRoom,
+  null,              // no fingerprint yet — we don't have a key yet
+  onPeerJoined, onPeerLeft,
+  onJoinRequestNeeded,
+  onCreatorConflict,
+);
+
+// Phase 2: creator election — wait 5s to hear from an existing creator.
+// If no key-grant arrives in this window, we ARE the creator.
+// 5s gives the creator enough time to see the join-request prompt and approve it.
+ui.printSystem('Listening for existing room creator (5s)...', 'info');
+await new Promise((resolve) => setTimeout(resolve, 5000));
+
+if (!roomKey) {
+  // No one sent us a key → we are the first in this room → become creator
+  isCreator = true;
+  roomKey = generateRoomKey();
+  activateKey(roomKey);
+  ui.printSystem(`Room created. Key fingerprint: ${fingerprint(roomKey)}`, 'info');
+}
+
+// ── Banner + status bar ───────────────────────────────────────────────────────
+ui.printBanner(myName, myIP, myTcpPort, myRoom, isCreator);
+ui.updatePrompt(getAllPeers().length);
+ui.startStatusBar(() => ({
+  room: myRoom,
+  peerCount: getAllPeers().length,
+  encrypted: !!roomKey,
+}));
+>>>>>>> c94564b (Update discovery and index)
 
 // ── Command loop ──────────────────────────────────────────────────────────────
 rl.on('line', async (line) => {
@@ -169,6 +320,7 @@ rl.on('line', async (line) => {
       } else {
         try {
           await sendMessage(peer.ip, peer.port, myName, myTcpPort, text);
+          hasSentMessage = true;
           ui.printOwnMessage(text, peer.name);
         } catch (err) {
           ui.printSystem(`Failed to reach ${peer.name}: ${err.message}`, 'error');
@@ -191,6 +343,7 @@ rl.on('line', async (line) => {
       ui.printSystem('No peers online. Your message will be delivered once others join.', 'warn');
     } else {
       await broadcastMessage(peers, myName, myTcpPort, input);
+      hasSentMessage = true;
       ui.printOwnMessage(input, 'All');
     }
   }
