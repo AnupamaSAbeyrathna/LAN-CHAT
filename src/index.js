@@ -53,12 +53,25 @@ if (/[^\w\-.]/.test(myName)) {
 
 // ── Local IP ──────────────────────────────────────────────────────────────────
 function getLocalIP() {
+  let best = '127.0.0.1';
+  let bestScore = -1;
   for (const iface of Object.values(os.networkInterfaces())) {
     for (const cfg of iface) {
-      if (cfg.family === 'IPv4' && !cfg.internal) return cfg.address;
+      if (cfg.family !== 'IPv4' || cfg.internal) continue;
+      const ip = cfg.address;
+      let score = 0;
+      if      (ip.startsWith('10.'))         score = 3; // real LAN
+      else if (ip.startsWith('172.'))        score = 2;
+      else if (ip.startsWith('192.168.'))    score = 1;
+      // penalise virtual / hotspot / link-local adapters
+      if (ip.startsWith('192.168.175.') ||
+          ip.startsWith('192.168.56.')  ||
+          ip.startsWith('172.16.')      ||
+          ip.startsWith('169.254.'))    score = 0;
+      if (score > bestScore) { bestScore = score; best = ip; }
     }
   }
-  return '127.0.0.1';
+  return best;
 }
 
 const myIP = getLocalIP();
