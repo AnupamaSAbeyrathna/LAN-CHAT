@@ -145,13 +145,7 @@ async function promptForRoom() {
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 await promptForRoom();
 
-// Creator = first to start in the room → generates the room key
-isCreator = true; // assumed until we see an existing room announce (see discovery)
-roomKey = generateRoomKey();
-senderSetKey(roomKey);
-serverSetKey(roomKey, decrypt);
-ui.setEncrypted(true);
-
+// init UI before we start any services
 ui.init(rl, { name: myName, ip: myIP, port: myTcpPort, room: myRoom });
 
 // ── Peer event callbacks ──────────────────────────────────────────────────────
@@ -195,28 +189,30 @@ async function onJoinRequest(ip, port, name) {
   ui.updatePrompt(getAllPeers().length);
 }
 
-// ── Key exchange (joiner side) ────────────────────────────────────────────────
+// ── Key exchange (joiner side) — called when onKeyGrant received ──────────────
 function onKeyGrant(hexKey) {
-  // We've received the room key from the creator
-  isCreator = false;
+  if (isCreator && roomKey) return; // already the creator, ignore stale grants
   const key = hexToKey(hexKey);
+  roomKey = key;
+  isCreator = false;
   activateKey(key);
-  // Signal ready — start broadcasting with key fingerprint
-  ui.printSystem('🔒 Key received — encryption active!', 'info');
+  ui.printSystem('🔒 Key received — E2E encryption active!', 'info');
+  ui.updatePrompt(getAllPeers().length);
 }
 
-// ── Joiner sending join-request to creator ────────────────────────────────────
+// ── Joiner sees existing creator in discovery → send join-request ─────────────
 async function onJoinRequestNeeded(ip, port) {
-  // We're not the creator — send a join-request to the peer who has the key
+  if (isCreator && roomKey) {
+    // We already elected ourselves creator — another node also thinks it's creator.
+    // Whoever started first wins. Ignore and let them send us a join-request.
+    return;
+  }
+  // Mark as joiner immediately so we don't race-generate a key
   isCreator = false;
-  // Remove own key temporarily (we don't have the room key yet)
-  senderSetKey(null);
-  serverSetKey(null, null);
-  ui.setEncrypted(false);
 
   try {
     await sendJoinRequest(ip, port, myName, myTcpPort);
-    ui.printSystem(`Join request sent to ${ip}:${port} — waiting for approval...`, 'info');
+    ui.printSystem(`Join request sent — waiting for approval...`, 'info');
   } catch {
     ui.printSystem(`Could not reach room creator at ${ip}:${port}`, 'warn');
   }
@@ -248,18 +244,33 @@ async function quit(notify = true) {
 rl.on('SIGINT', quit);
 
 // ── Start services ────────────────────────────────────────────────────────────
+// Phase 1: start server and discovery with NO room key yet.
+// This lets us receive a key-grant from an existing room creator.
 startServer(myTcpPort, onPeerLeft, onPeerSeen, onJoinRequest, onKeyGrant, onNuke);
 
 const discovery = startDiscovery(
   myName, myTcpPort, myRoom,
-  roomKey ? fingerprint(roomKey) : null,
+  null,              // no fingerprint yet — we don't have a key yet
   onPeerJoined, onPeerLeft,
   onJoinRequestNeeded,
 );
 
+// Phase 2: creator election — wait 2s to hear from an existing creator.
+// If no key-grant arrives in this window, we ARE the creator.
+ui.printSystem('Listening for existing room creator (2s)...', 'info');
+await new Promise((resolve) => setTimeout(resolve, 2000));
+
+if (!roomKey) {
+  // No one sent us a key → we are the first in this room → become creator
+  isCreator = true;
+  roomKey = generateRoomKey();
+  activateKey(roomKey);
+  ui.printSystem(`Room created. Key fingerprint: ${fingerprint(roomKey)}`, 'info');
+}
+
 // ── Banner + status bar ───────────────────────────────────────────────────────
 ui.printBanner(myName, myIP, myTcpPort, myRoom, isCreator);
-ui.updatePrompt(0);
+ui.updatePrompt(getAllPeers().length);
 ui.startStatusBar(() => ({
   room: myRoom,
   peerCount: getAllPeers().length,
