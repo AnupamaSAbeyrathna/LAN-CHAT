@@ -9,6 +9,7 @@
     },
     "scripts": {
         "start": "node src/index.js",
+        "start:name": "node src/index.js --name",
         "start:alice": "node src/index.js --name Alice",
         "start:bob": "node src/index.js --name Bob --port 9002",
         "matrix": "node src/index.js --name Neo",
