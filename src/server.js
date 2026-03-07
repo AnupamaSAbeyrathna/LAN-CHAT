@@ -14,12 +14,18 @@ import * as ui from './ui.js';
  * @param {function} onLeave   - Called when a 'leave' packet is received: (peer)
  * @returns {net.Server}
  */
+const MAX_PACKET_SIZE = 64 * 1024; // 64 KB — prevents memory exhaustion
+
 export function startServer(tcpPort = 9001, onLeave = () => {}) {
   const server = net.createServer((socket) => {
     let rawData = '';
 
     socket.on('data', (chunk) => {
       rawData += chunk.toString();
+      if (rawData.length > MAX_PACKET_SIZE) {
+        socket.destroy();
+        return;
+      }
     });
 
     socket.on('end', () => {

@@ -8,7 +8,7 @@
  */
 
 import net from 'net';
-import chalk from 'chalk';
+import * as ui from './ui.js';
 
 /**
  * Sends a chat message to a single peer.
@@ -21,9 +21,9 @@ import chalk from 'chalk';
  */
 export function sendMessage(toIp, toPort, fromName, fromPort, text) {
   return _send(toIp, toPort, {
-    type:      'msg',
-    from:      fromName,
-    port:      fromPort,
+    type: 'msg',
+    from: fromName,
+    port: fromPort,
     text,
     timestamp: new Date().toISOString(),
   });
@@ -35,9 +35,9 @@ export function sendMessage(toIp, toPort, fromName, fromPort, text) {
  */
 export function sendLeave(toIp, toPort, fromName, fromPort) {
   return _send(toIp, toPort, {
-    type:      'leave',
-    from:      fromName,
-    port:      fromPort,
+    type: 'leave',
+    from: fromName,
+    port: fromPort,
     timestamp: new Date().toISOString(),
   }, { timeout: 2000, failSilently: true });
 }
@@ -54,9 +54,7 @@ export async function broadcastMessage(peers, fromName, fromPort, text) {
 
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
-      process.stdout.write('\r\x1b[K');
-      console.log(chalk.red(`[System] Failed to reach ${peers[i].name} (${peers[i].ip}): ${result.reason.message}`));
-      process.stdout.write(chalk.green('> '));
+      ui.printSystem(`Failed to reach ${peers[i].name} (${peers[i].ip}): ${result.reason.message}`, 'error');
     }
   });
 }

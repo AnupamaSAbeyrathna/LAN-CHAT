@@ -16,9 +16,9 @@ import crypto from 'crypto';
 import { upsertPeer, expireOldPeers } from './peers.js';
 
 export const UDP_PORT = 9000;             // Well-known LAN discovery port (fixed)
-const BROADCAST_ADDR  = '255.255.255.255';
+const BROADCAST_ADDR = '255.255.255.255';
 const ANNOUNCE_INTERVAL_MS = 3_000;
-const EXPIRE_INTERVAL_MS   = 5_000;
+const EXPIRE_INTERVAL_MS = 5_000;
 
 /**
  * Starts UDP discovery — broadcasting presence and listening for peers.
@@ -27,15 +27,21 @@ const EXPIRE_INTERVAL_MS   = 5_000;
  * @param {number}   myTcpPort    - This instance's TCP listening port
  * @param {function} onPeerJoined - Called with a peer object when a new peer appears
  * @param {function} onPeerLeft   - Called with a peer object when a peer expires
- * @returns {dgram.Socket}        - The UDP socket (so caller can close it)
+ * @returns {{ socket: dgram.Socket, stop: () => void }}
  */
 export function startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft) {
   // Unique ID for this instance — used to filter out our own reflected broadcasts
   const myNodeId = crypto.randomBytes(8).toString('hex');
 
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  let announceTimer = null;
+  let expireTimer = null;
 
   socket.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ✖ UDP discovery port ${UDP_PORT} is already in use.`);
+      process.exit(1);
+    }
     // Non-fatal: log and continue (e.g. network interface went down briefly)
     console.error(`[Discovery] UDP error: ${err.message}`);
   });
@@ -63,9 +69,9 @@ export function startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft) {
 
     // Build the announce payload once (it doesn't change)
     const announcePayload = Buffer.from(JSON.stringify({
-      type:   'announce',
-      name:   myName,
-      port:   myTcpPort,
+      type: 'announce',
+      name: myName,
+      port: myTcpPort,
       nodeId: myNodeId,
     }));
 
@@ -74,15 +80,23 @@ export function startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft) {
       socket.send(announcePayload, 0, announcePayload.length, UDP_PORT, BROADCAST_ADDR);
     };
     broadcast();
-    setInterval(broadcast, ANNOUNCE_INTERVAL_MS);
+    announceTimer = setInterval(broadcast, ANNOUNCE_INTERVAL_MS);
 
     // Periodically prune peers that stopped announcing
-    setInterval(() => {
+    expireTimer = setInterval(() => {
       const expired = expireOldPeers();
       expired.forEach((peer) => onPeerLeft(peer));
     }, EXPIRE_INTERVAL_MS);
   });
 
   socket.bind(UDP_PORT);
-  return socket;
+
+  /** Clean up timers and close the UDP socket. */
+  function stop() {
+    if (announceTimer) clearInterval(announceTimer);
+    if (expireTimer) clearInterval(expireTimer);
+    socket.close();
+  }
+
+  return { socket, stop };
 }

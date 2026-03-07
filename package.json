@@ -4,6 +4,9 @@
     "description": "CLI-based peer-to-peer chat app for local WiFi networks",
     "main": "src/index.js",
     "type": "module",
+    "bin": {
+        "lan-chat": "src/index.js"
+    },
     "scripts": {
         "start": "node src/index.js"
     },
