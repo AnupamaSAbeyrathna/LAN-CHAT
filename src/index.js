@@ -66,8 +66,9 @@ function getLocalIP() {
 const myIP = getLocalIP();
 
 // ── Crypto state ──────────────────────────────────────────────────────────────
-let roomKey = null;   // Buffer | null
+let roomKey = null;      // Buffer | null
 let isCreator = false;
+let sentJoinRequest = false; // true once we've sent at least one join-request
 
 function activateKey(key) {
   roomKey = key;
@@ -203,8 +204,7 @@ function onKeyGrant(hexKey) {
 // ── Joiner sees existing creator in discovery → send join-request ─────────────
 async function onJoinRequestNeeded(ip, port) {
   if (isCreator && roomKey) {
-    // We already elected ourselves creator — another node also thinks it's creator.
-    // Whoever started first wins. Ignore and let them send us a join-request.
+    // We already have a real key as creator — ignore stale triggers.
     return;
   }
   // Mark as joiner immediately so we don't race-generate a key
@@ -212,6 +212,7 @@ async function onJoinRequestNeeded(ip, port) {
 
   try {
     await sendJoinRequest(ip, port, myName, myTcpPort);
+    sentJoinRequest = true; // prevent self-election while awaiting approval
     ui.printSystem(`Join request sent — waiting for approval...`, 'info');
   } catch {
     ui.printSystem(`Could not reach room creator at ${ip}:${port}`, 'warn');
@@ -255,13 +256,32 @@ const discovery = startDiscovery(
   onJoinRequestNeeded,
 );
 
-// Phase 2: creator election — wait 2s to hear from an existing creator.
-// If no key-grant arrives in this window, we ARE the creator.
+// Phase 1 (2s): Listen for an existing creator broadcasting a real fingerprint.
+// If one is found, onJoinRequestNeeded() fires and we receive the key via key-grant.
 ui.printSystem('Listening for existing room creator (2s)...', 'info');
 await new Promise((resolve) => setTimeout(resolve, 2000));
 
 if (!roomKey) {
-  // No one sent us a key → we are the first in this room → become creator
+  // Phase 2 (1s): No creator heard yet. Broadcast '__pending__' to signal we are
+  // in the election window — any already-keyed node will immediately re-broadcast
+  // its real fingerprint, which discovery catches and fires a join-request for us.
+  discovery.updateFingerprint('__pending__');
+  ui.printSystem('No creator found — running election (1s)...', 'info');
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+}
+
+if (!roomKey && sentJoinRequest) {
+  // We sent a join-request but the key-grant hasn't arrived yet (creator is still
+  // typing 'y'). Wait up to 30s for approval before falling back to creator mode.
+  ui.printSystem('Awaiting key from room creator (up to 30s)...', 'info');
+  await new Promise((resolve) => {
+    const poll = setInterval(() => { if (roomKey) { clearInterval(poll); resolve(); } }, 200);
+    setTimeout(() => { clearInterval(poll); resolve(); }, 30_000);
+  });
+}
+
+if (!roomKey) {
+  // Still no key → we are the first/only node → become creator.
   isCreator = true;
   roomKey = generateRoomKey();
   activateKey(roomKey);
