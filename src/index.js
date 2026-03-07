@@ -30,12 +30,14 @@ const { values: cliArgs } = parseArgs({
   options: {
     name: { type: 'string', default: 'User' },
     port: { type: 'string', default: '9001' },
+    room: { type: 'string', default: '' },
   },
   strict: false,
 });
 
 const myName = cliArgs.name;
 const myTcpPort = parseInt(cliArgs.port, 10);
+let myRoom = (cliArgs.room || '').toLowerCase().trim();
 
 // ── Validate name ─────────────────────────────────────────────────────────────
 if (!myName || myName.trim().length === 0 || myName.length > 32) {
@@ -84,12 +86,56 @@ function tabCompleter(line) {
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
-  prompt: '',           // set properly below after ui.init()
+  prompt: '',           // set properly after ui.init()
   completer: tabCompleter,
 });
 
-// Connect ui module to the readline instance
-ui.init(rl);
+// ── Room name validation helper ───────────────────────────────────────────────
+function isValidRoom(r) {
+  return r.length >= 1 && r.length <= 32 && /^[\w-]+$/.test(r);
+}
+
+/**
+ * If --room was not provided, ask the user interactively.
+ * Validates input and retries on bad input. Default is 'general'.
+ */
+async function promptForRoom() {
+  if (myRoom && isValidRoom(myRoom)) return; // already set via flag
+
+  if (myRoom && !isValidRoom(myRoom)) {
+    console.error('  ✖ Room name may only contain letters, numbers, and hyphens (1-32 chars).');
+    process.exit(1);
+  }
+
+  process.stdout.write('\n');
+  process.stdout.write('  ┌─ Join a Room ────────────────────────────────┐\n');
+  process.stdout.write('  │  Share the same room name to chat together   │\n');
+  process.stdout.write('  └──────────────────────────────────────────────┘\n');
+  process.stdout.write('\n');
+
+  return new Promise((resolve) => {
+    const ask = () => {
+      rl.question('  Room name [general]: ', (answer) => {
+        const trimmed = answer.trim().toLowerCase() || 'general';
+        if (!isValidRoom(trimmed)) {
+          process.stdout.write('  ⚠  Only letters, numbers, hyphens allowed (1-32 chars). Try again.\n');
+          ask();
+        } else {
+          myRoom = trimmed;
+          resolve();
+        }
+      });
+    };
+    ask();
+  });
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+await promptForRoom();
+
+// Connect ui module to the readline instance (after room is known)
+ui.init(rl, { name: myName, ip: myIP, port: myTcpPort, room: myRoom });
+
 
 // ── Peer event callbacks ──────────────────────────────────────────────────────
 function onPeerJoined(peer) {
@@ -127,10 +173,10 @@ rl.on('SIGINT', quit);
 
 // ── Start services ────────────────────────────────────────────────────────────
 startServer(myTcpPort, onPeerLeft, onPeerSeen);
-const discovery = startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft);
+const discovery = startDiscovery(myName, myTcpPort, myRoom, onPeerJoined, onPeerLeft);
 
 // ── Banner + initial prompt ───────────────────────────────────────────────────
-ui.printBanner(myName, myIP, myTcpPort);
+ui.printBanner(myName, myIP, myTcpPort, myRoom);
 ui.updatePrompt(0);
 
 // ── Command loop ──────────────────────────────────────────────────────────────
