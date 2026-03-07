@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /**
  * index.js — Entry Point (Phase 1 + 2 + 3)
  *
@@ -16,6 +18,7 @@
 
 import readline from 'readline';
 import os from 'os';
+import { parseArgs } from 'node:util';
 import { startServer } from './server.js';
 import { startDiscovery } from './discovery.js';
 import { getAllPeers, upsertPeer } from './peers.js';
@@ -23,15 +26,28 @@ import { sendMessage, broadcastMessage, sendLeave } from './sender.js';
 import * as ui from './ui.js';
 
 // ── Parse CLI args ────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
+const { values: cliArgs } = parseArgs({
+  options: {
+    name: { type: 'string', default: 'User' },
+    port: { type: 'string', default: '9001' },
+  },
+  strict: false,
+});
 
-function getArg(flag, fallback) {
-  const idx = args.indexOf(flag);
-  return idx !== -1 && args[idx + 1] ? args[idx + 1] : fallback;
+const myName = cliArgs.name;
+const myTcpPort = parseInt(cliArgs.port, 10);
+
+// ── Validate name ─────────────────────────────────────────────────────────────
+if (!myName || myName.trim().length === 0 || myName.length > 32) {
+  console.error('  ✖ Name must be 1–32 non-empty characters.');
+  console.error('    Usage: node src/index.js --name <YourName>');
+  process.exit(1);
 }
 
-const myName    = getArg('--name', 'User');
-const myTcpPort = parseInt(getArg('--port', '9001'), 10);
+if (/[^\w\-.]/.test(myName)) {
+  console.error('  ✖ Name may only contain letters, numbers, hyphens, underscores, and dots.');
+  process.exit(1);
+}
 
 // ── Local IP ──────────────────────────────────────────────────────────────────
 function getLocalIP() {
@@ -52,8 +68,8 @@ function tabCompleter(line) {
   // Complete peer name after "/msg "
   if (line.startsWith('/msg ')) {
     const partial = line.slice(5);
-    const peers   = getAllPeers();
-    const hits    = peers
+    const peers = getAllPeers();
+    const hits = peers
       .filter((p) => p.name.toLowerCase().startsWith(partial.toLowerCase()))
       .map((p) => `/msg ${p.name} `);
     return [hits.length ? hits : [], line];
@@ -66,9 +82,9 @@ function tabCompleter(line) {
 
 // ── Readline ──────────────────────────────────────────────────────────────────
 const rl = readline.createInterface({
-  input:     process.stdin,
-  output:    process.stdout,
-  prompt:    '',           // set properly below after ui.init()
+  input: process.stdin,
+  output: process.stdout,
+  prompt: '',           // set properly below after ui.init()
   completer: tabCompleter,
 });
 
@@ -100,6 +116,7 @@ async function quit() {
   await Promise.allSettled(
     peers.map((p) => sendLeave(p.ip, p.port, myName, myTcpPort))
   );
+  discovery.stop();
   ui.printSystem('Goodbye! 👋');
   rl.close();
   process.exit(0);
@@ -129,21 +146,21 @@ rl.on('line', async (line) => {
   if (input === '/list') {
     ui.printPeerList(getAllPeers());
 
-  // ── /help ──────────────────────────────────────────────────────────────────
+    // ── /help ──────────────────────────────────────────────────────────────────
   } else if (input === '/help') {
     ui.printHelp();
 
-  // ── /msg <name> <text> ─────────────────────────────────────────────────────
+    // ── /msg <name> <text> ─────────────────────────────────────────────────────
   } else if (input.startsWith('/msg ')) {
-    const rest  = input.slice(5).trim();
+    const rest = input.slice(5).trim();
     const space = rest.indexOf(' ');
 
     if (space === -1) {
       ui.printSystem('Usage: /msg <name> <message>', 'error');
     } else {
       const targetName = rest.slice(0, space).trim();
-      const text       = rest.slice(space + 1).trim();
-      const peer       = getAllPeers().find(
+      const text = rest.slice(space + 1).trim();
+      const peer = getAllPeers().find(
         (p) => p.name.toLowerCase() === targetName.toLowerCase()
       );
 
@@ -159,15 +176,15 @@ rl.on('line', async (line) => {
       }
     }
 
-  // ── /quit ──────────────────────────────────────────────────────────────────
+    // ── /quit ──────────────────────────────────────────────────────────────────
   } else if (input === '/quit') {
     await quit();
 
-  // ── Unknown command ────────────────────────────────────────────────────────
+    // ── Unknown command ────────────────────────────────────────────────────────
   } else if (input.startsWith('/')) {
     ui.printSystem(`Unknown command "${input}". Type /help to see available commands.`, 'error');
 
-  // ── Broadcast ─────────────────────────────────────────────────────────────
+    // ── Broadcast ─────────────────────────────────────────────────────────────
   } else {
     const peers = getAllPeers();
     if (peers.length === 0) {
