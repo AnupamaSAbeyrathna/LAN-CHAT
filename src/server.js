@@ -11,7 +11,9 @@ import * as ui from './ui.js';
 /**
  * Creates and starts the TCP server.
  * @param {number}   tcpPort   - Port to listen on (default 9001)
- * @param {function} onLeave   - Called when a 'leave' packet is received: (peer)
+ * @param {function} onLeave    - Called when a 'leave' packet is received: (peer)
+ * @param {function} onPeerSeen - Called on every 'msg' with (ip, port, name) — backfills
+ *                                 peer registry when UDP discovery is blocked
  * @returns {net.Server}
  */
 const MAX_PACKET_SIZE = 64 * 1024; // 64 KB — prevents memory exhaustion
@@ -31,7 +33,7 @@ export function startServer(tcpPort = 9001, onLeave = () => {}) {
     socket.on('end', () => {
       try {
         const packet = JSON.parse(rawData);
-        handlePacket(packet, socket.remoteAddress, onLeave);
+        handlePacket(packet, socket.remoteAddress, onLeave, onPeerSeen);
       } catch {
         // Drop malformed packets silently
       }
@@ -59,9 +61,11 @@ export function startServer(tcpPort = 9001, onLeave = () => {}) {
   return server;
 }
 
-function handlePacket(packet, remoteIp, onLeave) {
+function handlePacket(packet, remoteIp, onLeave, onPeerSeen) {
   switch (packet.type) {
     case 'msg':
+      // Backfill peer registry from TCP connection (fallback when UDP is blocked)
+      if (packet.port) onPeerSeen(remoteIp, packet.port, packet.from);
       ui.printMessage(packet.from, packet.text);
       break;
 
