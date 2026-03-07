@@ -18,7 +18,7 @@ import readline from 'readline';
 import os from 'os';
 import { startServer } from './server.js';
 import { startDiscovery } from './discovery.js';
-import { getAllPeers } from './peers.js';
+import { getAllPeers, upsertPeer } from './peers.js';
 import { sendMessage, broadcastMessage, sendLeave } from './sender.js';
 import * as ui from './ui.js';
 
@@ -86,6 +86,13 @@ function onPeerLeft(peer) {
   ui.updatePrompt(getAllPeers().length);
 }
 
+// Called by server.js when a TCP message carries a port we haven't seen via UDP.
+// This is the fallback path when UDP broadcast is blocked (firewall, AP isolation).
+function onPeerSeen(ip, port, name) {
+  const isNew = upsertPeer(ip, port, name);
+  if (isNew) onPeerJoined({ ip, port, name });
+}
+
 // ── Graceful exit ─────────────────────────────────────────────────────────────
 async function quit() {
   ui.printSystem('Notifying peers and exiting...');
@@ -102,7 +109,7 @@ async function quit() {
 rl.on('SIGINT', quit);
 
 // ── Start services ────────────────────────────────────────────────────────────
-startServer(myTcpPort, onPeerLeft);
+startServer(myTcpPort, onPeerLeft, onPeerSeen);
 startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft);
 
 // ── Banner + initial prompt ───────────────────────────────────────────────────
