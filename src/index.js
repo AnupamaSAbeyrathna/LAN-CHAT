@@ -18,6 +18,7 @@
 
 import readline from 'readline';
 import os from 'os';
+import { createSocket } from 'dgram';
 import { parseArgs } from 'node:util';
 import { startServer } from './server.js';
 import { startDiscovery } from './discovery.js';
@@ -52,16 +53,22 @@ if (/[^\w\-.]/.test(myName)) {
 }
 
 // ── Local IP ──────────────────────────────────────────────────────────────────
+// Uses a UDP socket "connect" so the OS picks the correct outbound interface
+// via its routing table. No packets are actually sent.
+
 function getLocalIP() {
-  for (const iface of Object.values(os.networkInterfaces())) {
-    for (const cfg of iface) {
-      if (cfg.family === 'IPv4' && !cfg.internal) return cfg.address;
-    }
-  }
-  return '127.0.0.1';
+  return new Promise((resolve) => {
+    const socket = createSocket('udp4');
+    socket.connect(80, '8.8.8.8', () => {
+      const address = socket.address().address;
+      socket.close();
+      resolve(address);
+    });
+    socket.on('error', () => resolve('127.0.0.1'));
+  });
 }
 
-const myIP = getLocalIP();
+const myIP = await getLocalIP();
 
 // ── Tab completer ─────────────────────────────────────────────────────────────
 const BASE_COMMANDS = ['/list', '/msg ', '/help', '/quit'];
