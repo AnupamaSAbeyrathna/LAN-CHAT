@@ -18,7 +18,7 @@ import * as ui from './ui.js';
  */
 const MAX_PACKET_SIZE = 64 * 1024; // 64 KB — prevents memory exhaustion
 
-export function startServer(tcpPort = 9001, onLeave = () => {}) {
+export function startServer(tcpPort = 9001, onLeave = () => {}, onPeerSeen = () => {}) {
   const server = net.createServer((socket) => {
     let rawData = '';
 

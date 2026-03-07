@@ -8,7 +8,11 @@
         "lan-chat": "src/index.js"
     },
     "scripts": {
-        "start": "node src/index.js"
+        "start": "node src/index.js",
+        "start:alice": "node src/index.js --name Alice",
+        "start:bob": "node src/index.js --name Bob --port 9002",
+        "matrix": "node src/index.js --name Neo",
+        "ghost": "node src/index.js --name Ghost"
     },
     "keywords": [
         "chat",

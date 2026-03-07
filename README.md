@@ -49,6 +49,7 @@ node src/index.js --name Bob --port 9002
 - Each node **broadcasts** its presence every 3 seconds  
 - Peers **expire** automatically after 15 seconds of silence  
 - Messages are short-lived TCP connections carrying JSON packets  
+- **TCP Fallback:** If UDP broadcasts are dropped (e.g., strict firewalls or AP isolation), peers automatically discover each other via incoming direct TCP messages.  
 
 ---
 

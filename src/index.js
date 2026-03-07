@@ -127,7 +127,7 @@ rl.on('SIGINT', quit);
 
 // ── Start services ────────────────────────────────────────────────────────────
 startServer(myTcpPort, onPeerLeft, onPeerSeen);
-startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft);
+const discovery = startDiscovery(myName, myTcpPort, onPeerJoined, onPeerLeft);
 
 // ── Banner + initial prompt ───────────────────────────────────────────────────
 ui.printBanner(myName, myIP, myTcpPort);
