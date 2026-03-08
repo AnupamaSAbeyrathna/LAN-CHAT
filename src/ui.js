@@ -1,20 +1,27 @@
 /**
- * ui.js — Centralized Terminal UI Module
+ * ui.js — Centralized Terminal UI Module (v3 — Split-Screen)
  *
- * Responsibilities:
- *  - Consistent, color-coded message rendering with URL hyperlinks
- *  - Safe "print without clobbering the readline prompt" pattern
- *  - Stable per-peer color assignment (hash-based from a curated palette)
- *  - Dynamic prompt: #room [N peers] ›
- *  - /list (includes self), /help, /ping, /status output
- *  - Live status bar at bottom of terminal
- *  - Startup banner with room + encryption indicator
- *  - /nuke warning display
+ * Layout (ANSI scroll-region approach):
+ *
+ *   ┌─────────────────────────────────────┐  ← row 1
+ *   │                                     │
+ *   │   CHAT AREA  (scrollable region)    │
+ *   │                                     │
+ *   ├─────────────────────────────────────┤  ← row H-2  (separator)
+ *   │  STATUS BAR                         │  ← row H-1
+ *   │  PROMPT ›                           │  ← row H    (readline input)
+ *   └─────────────────────────────────────┘
+ *
+ * The scroll region is set to rows [1, H-2] so all normal output
+ * stays inside the chat area and the bottom 2 rows are always visible.
+ * When the terminal is resized, we reconfigure the scroll region.
+ *
+ * No external dependencies beyond chalk.
  */
 
 import chalk from 'chalk';
 
-// ── Internal state ────────────────────────────────────────────────────────────
+// ── Internal state ─────────────────────────────────────────────────────────────
 let _rl = null;
 let _peerCount = 0;
 let _room = 'general';
@@ -24,9 +31,61 @@ let _myPort = 0;
 let _encrypted = false;
 let _startTime = Date.now();
 let _statusTimer = null;
-let _getStatusInfo = null; // callback: () => { peerCount, encrypted, room }
+let _getStatusInfo = null;
 
-// ── Peer color palette ────────────────────────────────────────────────────────
+// ── Terminal geometry ──────────────────────────────────────────────────────────
+function rows() { return process.stdout.rows || 24; }
+function cols() { return process.stdout.columns || 80; }
+
+// ── ANSI helpers ───────────────────────────────────────────────────────────────
+const ESC = '\x1b';
+const CSI = `${ESC}[`;
+/** Move cursor to absolute row, col (1-indexed). */
+const moveTo = (r, c) => `${CSI}${r};${c}H`;
+/** Save cursor position. */
+const saveCur = () => process.stdout.write(`${ESC}7`);
+/** Restore cursor position. */
+const restCur = () => process.stdout.write(`${ESC}8`);
+/** Set scroll region to rows [top, bot] (1-indexed). */
+const scrollRegion = (top, bot) => process.stdout.write(`${CSI}${top};${bot}r`);
+/** Reset scroll region to full terminal. */
+const resetScrollRegion = () => process.stdout.write(`${CSI}r`);
+/** Clear to end of line. */
+const clrEOL = () => `${CSI}K`;
+/** Erase entire line at current row. */
+const clrLine = (r) => `${moveTo(r, 1)}${CSI}2K`;
+
+// ── Layout constants ───────────────────────────────────────────────────────────
+/** Row of the separator line (second-to-last). */
+function rowSep() { return rows() - 1; }
+/** Row of the status bar. */
+function rowStatus() { return rows() - 1; }
+/** Row of the input prompt (very last). */
+function rowPrompt() { return rows(); }
+
+// ── Setup / teardown ───────────────────────────────────────────────────────────
+function setupLayout() {
+  const H = rows();
+  // Set scroll region: rows 1 … H-2 (chat area)
+  scrollRegion(1, H - 2);
+  // Draw separator
+  _drawSeparator();
+  // Position cursor at bottom of chat area (so new output flows there)
+  process.stdout.write(moveTo(H - 2, 1));
+}
+
+function teardownLayout() {
+  resetScrollRegion();
+  // Move to last row and leave a clean line
+  process.stdout.write(moveTo(rows(), 1));
+}
+
+function _drawSeparator() {
+  const line = chalk.dim('─'.repeat(cols()));
+  process.stdout.write(`${ESC}7${moveTo(rowSep(), 1)}${CSI}2K${line}${ESC}8`);
+}
+
+// ── Peer color palette ─────────────────────────────────────────────────────────
 const COLOR_PALETTE = [
   chalk.hex('#61DAFB'), // React blue
   chalk.hex('#F7DF1E'), // JS yellow
@@ -50,26 +109,19 @@ export function peerColor(name) {
   return colorCache.get(name);
 }
 
-// ── URL regex ─────────────────────────────────────────────────────────────────
+// ── URL regex ──────────────────────────────────────────────────────────────────
 const URL_RE = /https?:\/\/[^\s]+/g;
 
-/**
- * Format message text — detects URLs and wraps them with OSC 8 hyperlinks
- * (clickable in modern terminals) and highlights them in cyan.
- */
 function formatText(text) {
   return text.replace(URL_RE, (url) => {
-    // OSC 8 hyperlink: \x1b]8;;URL\x1b\\LABEL\x1b]8;;\x1b\\
     const link = `\x1b]8;;${url}\x1b\\${chalk.cyan.underline(url)}\x1b]8;;\x1b\\`;
     return link;
   });
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────────────────────
 /**
  * Must be called once after readline is created and room is known.
- * @param {object} rl        - readline interface
- * @param {object} identity  - { name, ip, port, room }
  */
 export function init(rl, identity = {}) {
   _rl = rl;
@@ -78,26 +130,48 @@ export function init(rl, identity = {}) {
   _myIP = identity.ip || '';
   _myPort = identity.port || 0;
   _startTime = Date.now();
+
+  setupLayout();
+
+  // Reconfigure on resize
+  process.stdout.on('resize', () => {
+    setupLayout();
+    _redrawStatusBar();
+    _redrawPrompt();
+  });
 }
 
-/** Mark whether messages are E2E encrypted (affects banner + status bar). */
+/** Mark whether messages are E2E encrypted. */
 export function setEncrypted(val) {
   _encrypted = !!val;
+  _redrawStatusBar();
 }
 
-// ── Core print helper ─────────────────────────────────────────────────────────
+// ── Core print helper ──────────────────────────────────────────────────────────
 /**
- * Safely prints a line by first clearing the readline prompt line,
- * printing, then restoring the prompt.
+ * Print a line into the CHAT AREA only.
+ * Saves cursor → moves into scroll region → writes → restores prompt.
  */
 function print(line) {
-  process.stdout.write('\r\x1b[K');
-  console.log(line);
-  if (_rl) _rl.prompt(true);
+  const H = rows();
+  const chatBottom = H - 2;
+
+  // Save cursor
+  process.stdout.write(`${ESC}7`);
+  // Move to bottom of chat area, ensure we're inside the scroll region
+  process.stdout.write(moveTo(chatBottom, 1));
+  // Scroll up one line (the scroll region will shift content up)
+  process.stdout.write('\n');
+  // Go to the new last line of the chat area and write content
+  process.stdout.write(`\r${clrEOL()}${line}`);
+  // Restore cursor (back to the prompt row and position)
+  process.stdout.write(`${ESC}8`);
+
+  // Redraw prompt to keep it clean (readline may have cleared it)
+  _redrawPrompt();
 }
 
-// ── Message renderers ─────────────────────────────────────────────────────────
-/** Render a message received from another peer. */
+// ── Message renderers ──────────────────────────────────────────────────────────
 export function printMessage(from, text) {
   const time = chalk.dim(`[${new Date().toLocaleTimeString()}]`);
   const color = peerColor(from);
@@ -107,7 +181,6 @@ export function printMessage(from, text) {
   print(`${time} ${sender}:${enc} ${body}`);
 }
 
-/** Render a message you just sent (echoed back to your own screen). */
 export function printOwnMessage(text, target = 'All') {
   const time = chalk.dim(`[${new Date().toLocaleTimeString()}]`);
   const label = chalk.dim(`You → ${target}`);
@@ -115,10 +188,6 @@ export function printOwnMessage(text, target = 'All') {
   print(`${time} ${label}: ${body}`);
 }
 
-/**
- * Render a system notice.
- * @param {'info'|'warn'|'error'} level
- */
 export function printSystem(msg, level = 'info') {
   const icon = level === 'error' ? chalk.red('✖')
     : level === 'warn' ? chalk.yellow('⚠')
@@ -126,74 +195,62 @@ export function printSystem(msg, level = 'info') {
   print(`${icon} ${chalk.dim(msg)}`);
 }
 
-/** Render a join/leave event with a divider. */
 export function printPeerEvent(name, event) {
   const color = peerColor(name);
   const verb = event === 'join'
     ? chalk.green('joined the chat')
     : chalk.yellow('left the chat');
   const divider = chalk.dim('─'.repeat(36));
-  process.stdout.write('\r\x1b[K');
-  console.log(`${divider} ${color.bold(name)} ${verb} ${divider}`);
-  if (_rl) _rl.prompt(true);
+  print(`${divider} ${color.bold(name)} ${verb} ${divider}`);
 }
 
-/** Render a join-request approval prompt (inlined in the stream). */
 export function printJoinRequest(name, ip, port) {
   const divider = chalk.dim('─'.repeat(36));
-  process.stdout.write('\r\x1b[K');
-  console.log('');
-  console.log(`${divider} ${chalk.yellow('⚑ Join Request')} ${divider}`);
-  console.log(`  ${chalk.yellow.bold(name)} ${chalk.dim(`(${ip}:${port})`)} wants to join ${chalk.cyan('#' + _room)}`);
-  process.stdout.write(`  Accept? ${chalk.green('[y]')}${chalk.dim('/')}${chalk.red('[N]')} `);
+  print('');
+  print(`${divider} ${chalk.yellow('⚑ Join Request')} ${divider}`);
+  print(`  ${chalk.yellow.bold(name)} ${chalk.dim(`(${ip}:${port})`)} wants to join ${chalk.cyan('#' + _room)}`);
+  print(`  Accept? ${chalk.green('[y]')}${chalk.dim('/')}${chalk.red('[N]')} `);
 }
 
-/** Render a nuke warning received from a peer. */
+
 export function printNukeWarning(from) {
-  process.stdout.write('\r\x1b[K');
-  console.log('');
-  console.log(chalk.red.bold('  💥 NUKED by ' + from + ' — room is being destroyed'));
-  console.log(chalk.red('  You will be disconnected in 2 seconds...'));
-  console.log('');
-  if (_rl) _rl.prompt(true);
+  print('');
+  print(chalk.red.bold('  💥 NUKED by ' + from + ' — room is being destroyed'));
+  print(chalk.red('  You will be disconnected in 2 seconds...'));
+  print('');
 }
 
-// ── /list output ──────────────────────────────────────────────────────────────
+// ── /list output ───────────────────────────────────────────────────────────────
 export function printPeerList(peers) {
-  process.stdout.write('\r\x1b[K');
-  console.log('');
-  const total = peers.length + 1; // +1 for self
-  console.log(`  ${chalk.bold(`Room #${_room}`)}  ${chalk.dim(`(${total} online)`)}`);
-  console.log(chalk.dim('  ' + '─'.repeat(40)));
+  print('');
+  const total = peers.length + 1;
+  print(`  ${chalk.bold(`Room #${_room}`)}  ${chalk.dim(`(${total} online)`)}`);
+  print(chalk.dim('  ' + '─'.repeat(40)));
 
-  // Self always first
   const selfColor = peerColor(_myName);
   const selfLabel = selfColor.bold(_myName.padEnd(16));
   const selfAddr = chalk.dim(`${_myIP}:${_myPort}`);
   const selfEnc = _encrypted ? chalk.green(' 🔒') : '';
-  console.log(`  ${chalk.cyan('●')} ${selfLabel} ${selfAddr}${selfEnc} ${chalk.cyan('(you)')}`);
+  print(`  ${chalk.cyan('●')} ${selfLabel} ${selfAddr}${selfEnc} ${chalk.cyan('(you)')}`);
 
   for (const p of peers) {
     const color = peerColor(p.name);
     const name = color.bold(p.name.padEnd(16));
     const addr = chalk.dim(`${p.ip}:${p.port}`);
-    const dot = chalk.green('●');
-    console.log(`  ${dot} ${name} ${addr}`);
+    print(`  ${chalk.green('●')} ${name} ${addr}`);
   }
-  console.log('');
+  print('');
   if (peers.length === 0) {
-    console.log(chalk.dim('  Waiting for others to join this room...'));
-    console.log('');
+    print(chalk.dim('  Waiting for others to join this room...'));
+    print('');
   }
-  if (_rl) _rl.prompt(true);
 }
 
-// ── /help output ─────────────────────────────────────────────────────────────
+// ── /help output ───────────────────────────────────────────────────────────────
 export function printHelp() {
-  process.stdout.write('\r\x1b[K');
-  console.log('');
-  console.log(`  ${chalk.bold('Commands')}`);
-  console.log(chalk.dim('  ' + '─'.repeat(40)));
+  print('');
+  print(`  ${chalk.bold('Commands')}`);
+  print(chalk.dim('  ' + '─'.repeat(40)));
   const cmds = [
     ['/list', 'Show all online peers (includes you)'],
     ['/msg <name> <text>', 'Send a direct message'],
@@ -205,13 +262,12 @@ export function printHelp() {
     ['<text>', 'Broadcast to all peers'],
   ];
   for (const [cmd, desc] of cmds) {
-    console.log(`  ${chalk.cyan(cmd.padEnd(22))} ${chalk.dim(desc)}`);
+    print(`  ${chalk.cyan(cmd.padEnd(22))} ${chalk.dim(desc)}`);
   }
-  console.log('');
-  if (_rl) _rl.prompt(true);
+  print('');
 }
 
-// ── /ping result ─────────────────────────────────────────────────────────────
+// ── /ping result ───────────────────────────────────────────────────────────────
 export function printPingResult(name, latencyMs, alive) {
   const color = peerColor(name);
   const nameStr = color.bold(name.padEnd(16));
@@ -225,56 +281,56 @@ export function printPingResult(name, latencyMs, alive) {
   print(`  ${chalk.green('✓')} ${nameStr} ${chalk.dim('──')} ${chalk.white(latencyMs + 'ms')} ${bar}`);
 }
 
-// ── /status output ────────────────────────────────────────────────────────────
+// ── /status output ─────────────────────────────────────────────────────────────
 export function printStatus(peers) {
   const uptime = Math.floor((Date.now() - _startTime) / 1000);
   const mins = Math.floor(uptime / 60);
   const secs = uptime % 60;
   const uptimeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 
-  process.stdout.write('\r\x1b[K');
-  console.log('');
-  console.log(`  ${chalk.bold('Room Status')}`);
-  console.log(chalk.dim('  ' + '─'.repeat(40)));
-  console.log(`  ${chalk.dim('Room:')}      ${chalk.cyan('#' + _room)}`);
-  console.log(`  ${chalk.dim('Peers:')}     ${chalk.white(peers.length + 1)} ${chalk.dim('(including you)')}`);
-  console.log(`  ${chalk.dim('Uptime:')}    ${chalk.white(uptimeStr)}`);
-  console.log(`  ${chalk.dim('Your IP:')}   ${chalk.white(_myIP + ':' + _myPort)}`);
-  console.log(`  ${chalk.dim('Security:')}  ${_encrypted
+  print('');
+  print(`  ${chalk.bold('Room Status')}`);
+  print(chalk.dim('  ' + '─'.repeat(40)));
+  print(`  ${chalk.dim('Room:')}      ${chalk.cyan('#' + _room)}`);
+  print(`  ${chalk.dim('Peers:')}     ${chalk.white(peers.length + 1)} ${chalk.dim('(including you)')}`);
+  print(`  ${chalk.dim('Uptime:')}    ${chalk.white(uptimeStr)}`);
+  print(`  ${chalk.dim('Your IP:')}   ${chalk.white(_myIP + ':' + _myPort)}`);
+  print(`  ${chalk.dim('Security:')}  ${_encrypted
     ? chalk.green('● E2E encrypted  🔒')
     : chalk.yellow('◌ Unencrypted (waiting for key exchange)')}`);
-  console.log('');
-  if (_rl) _rl.prompt(true);
+  print('');
 }
 
-// ── Prompt management ─────────────────────────────────────────────────────────
+// ── Prompt management ──────────────────────────────────────────────────────────
 function buildPrompt() {
   const roomLabel = chalk.cyan(`#${_room}`);
-  const encIcon = _encrypted ? chalk.green('🔒') : '';
+  const encIcon = _encrypted ? chalk.green(' 🔒') : '';
   if (_peerCount === 0) {
-    return `${roomLabel} ${encIcon} ${chalk.dim('[no peers]')} ${chalk.green('›')} `;
+    return `${roomLabel}${encIcon} ${chalk.dim('[no peers]')} ${chalk.green('›')} `;
   }
   const peerLabel = _peerCount === 1 ? '1 peer' : `${_peerCount} peers`;
-  return `${roomLabel} ${encIcon} ${chalk.green(`[${peerLabel}]`)} ${chalk.green('›')} `;
+  return `${roomLabel}${encIcon} ${chalk.green(`[${peerLabel}]`)} ${chalk.green('›')} `;
+}
+
+/** Redraw the readline prompt anchored to the last row. */
+function _redrawPrompt() {
+  if (!_rl) return;
+  _rl.setPrompt(buildPrompt());
+
+  // Move cursor to the last row before letting readline redraw itself
+  process.stdout.write(moveTo(rowPrompt(), 1));
+  _rl.prompt(true);
 }
 
 export function updatePrompt(peerCount) {
   _peerCount = peerCount;
-  if (_rl) {
-    _rl.setPrompt(buildPrompt());
-    process.stdout.write('\r\x1b[K');
-    _rl.prompt(true);
-  }
+  _redrawPrompt();
 }
 
-// ── Live Status Bar ───────────────────────────────────────────────────────────
-/**
- * Starts a persistent status bar rendered one line below the prompt.
- * Uses ANSI cursor-save/restore to avoid disrupting input.
- * @param {function} getInfo - Returns { peerCount, encrypted, room }
- */
+// ── Live Status Bar ────────────────────────────────────────────────────────────
 export function startStatusBar(getInfo) {
   _getStatusInfo = getInfo;
+  _redrawStatusBar();
   _statusTimer = setInterval(() => _redrawStatusBar(), 3000);
 }
 
@@ -283,8 +339,8 @@ export function stopStatusBar() {
     clearInterval(_statusTimer);
     _statusTimer = null;
   }
-  // Clear last status bar line
-  process.stdout.write('\x1b[s\x1b[1B\r\x1b[K\x1b[u');
+  // Erase the status row
+  process.stdout.write(`${ESC}7${clrLine(rowStatus())}${ESC}8`);
 }
 
 function _redrawStatusBar() {
@@ -299,31 +355,33 @@ function _redrawStatusBar() {
     : chalk.yellow('◌ unencrypted');
   const peers = peerCount === 1 ? '1 peer' : `${peerCount} peers`;
 
-  const bar = chalk.dim(
-    `  #${room} · ${peers} · uptime ${uptimeStr} · ${encStr}`
-  );
+  const content = `  ${chalk.cyan('#' + room)} ${chalk.dim('·')} ${chalk.white(peers)} ${chalk.dim('·')} uptime ${chalk.white(uptimeStr)} ${chalk.dim('·')} ${encStr}`;
 
-  // Save cursor → move down 1 line → clear line → write bar → restore cursor
-  process.stdout.write(`\x1b[s\x1b[1B\r\x1b[K${bar}\x1b[u`);
+  // Save cursor → jump to status row → clear → write → separator above → restore
+  process.stdout.write(
+    `${ESC}7` +
+    `${moveTo(rowStatus(), 1)}${CSI}2K${content}` +
+    `${ESC}8`
+  );
 }
 
-// ── Banner ────────────────────────────────────────────────────────────────────
+// ── Banner ─────────────────────────────────────────────────────────────────────
 export function printBanner(myName, myIP, myTcpPort, myRoom, isCreator) {
   const nameColor = peerColor(myName);
   const roleLabel = isCreator ? chalk.green('Creator') : chalk.cyan('Member');
-  console.log('');
-  console.log(chalk.bold.hex('#B8A9FF')('  ╔══════════════════════════════════════╗'));
-  console.log(chalk.bold.hex('#B8A9FF')('  ║') + chalk.bold('       LAN Chat  ·  Version 2         ') + chalk.bold.hex('#B8A9FF')('║'));
-  console.log(chalk.bold.hex('#B8A9FF')('  ╚══════════════════════════════════════╝'));
-  console.log('');
-  console.log(`  ${chalk.dim('You are')}  ${nameColor.bold(myName)} ${chalk.dim(`(${roleLabel}${chalk.dim(')')}`)}`)
-  console.log(`  ${chalk.dim('Room:')}    ${chalk.cyan(`#${myRoom}`)}`);
-  console.log(`  ${chalk.dim('IP:')}      ${chalk.white(myIP)} ${chalk.dim(`:${myTcpPort}`)}`);
-  console.log(`  ${chalk.dim('Status:')}  ${chalk.green('●')} ${chalk.green('Auto-discovery active')}`);
-  console.log(`  ${chalk.dim('Security:')} ${isCreator
+  print('');
+  print(chalk.bold.hex('#B8A9FF')('  ╔══════════════════════════════════════╗'));
+  print(chalk.bold.hex('#B8A9FF')('  ║') + chalk.bold('       LAN Chat  ·  Version 2         ') + chalk.bold.hex('#B8A9FF')('║'));
+  print(chalk.bold.hex('#B8A9FF')('  ╚══════════════════════════════════════╝'));
+  print('');
+  print(`  ${chalk.dim('You are')}  ${nameColor.bold(myName)} ${chalk.dim('(')}${roleLabel}${chalk.dim(')')}`);
+  print(`  ${chalk.dim('Room:')}    ${chalk.cyan(`#${myRoom}`)}`);
+  print(`  ${chalk.dim('IP:')}      ${chalk.white(myIP)} ${chalk.dim(`:${myTcpPort}`)}`);
+  print(`  ${chalk.dim('Status:')}  ${chalk.green('●')} ${chalk.green('Auto-discovery active')}`);
+  print(`  ${chalk.dim('Security:')} ${isCreator
     ? chalk.green('● Room key generated — approving joiners')
     : chalk.yellow('◌ Requesting key from room creator...')}`);
-  console.log('');
-  console.log(`  ${chalk.dim('Tab-complete commands and peer names. Type')} ${chalk.cyan('/help')} ${chalk.dim('for commands.')}`);
-  console.log('');
+  print('');
+  print(`  ${chalk.dim('Tab-complete commands and peer names. Type')} ${chalk.cyan('/help')} ${chalk.dim('for commands.')}`);
+  print('');
 }

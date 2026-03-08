@@ -92,7 +92,7 @@ export function startDiscovery(
       // Key fingerprint logic:
       //   - If the remote has a fingerprint and WE don't have a key yet → send join-request
       //   - If the remote has no fingerprint → legacy / unencrypted peer (accept normally)
-      if (packet.keyFingerprint && !currentFp) {
+      if (packet.keyFingerprint && packet.keyFingerprint !== '__pending__' && (!currentFp || currentFp === '__pending__')) {
         const reqKey = `${ip}:${port}`;
         if (!joinRequested.has(reqKey)) {
           joinRequested.add(reqKey);
@@ -100,6 +100,14 @@ export function startDiscovery(
         }
         // Don't register them as a peer yet — they'll join once key is granted
         return;
+      }
+
+      // If the peer is in the election window (__pending__) and WE already have a
+      // real key, immediately re-broadcast our announce so they can see our real
+      // fingerprint and send us a join-request before they accidentally self-elect.
+      if (packet.keyFingerprint === '__pending__' && currentFp && currentFp !== '__pending__') {
+        if (_broadcast) _broadcast();
+        // Fall through — register them as a pending peer so we don't miss the join-request
       }
 
       const isNew = upsertPeer(ip, port, name);
