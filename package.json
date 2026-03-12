@@ -2,19 +2,19 @@
     "name": "lan-chat",
     "version": "2.0.0",
     "description": "CLI-based peer-to-peer chat app for local WiFi networks with E2E encryption",
-    "main": "src/index.js",
+    "main": "src/cli/index.js",
     "type": "module",
     "bin": {
-        "lan-chat": "src/index.js"
+        "lan-chat": "src/cli/index.js"
     },
     "scripts": {
-        "start": "node src/index.js",
-        "new": "node src/launch.js",
-        "start:name": "node src/index.js --name",
-        "start:alice": "node src/index.js --name Alice",
-        "start:bob": "node src/index.js --name Bob --port 9002",
-        "matrix": "node src/index.js --name Neo",
-        "ghost": "node src/index.js --name Ghost"
+        "start": "node src/cli/index.js",
+        "new": "node src/cli/launch.js",
+        "start:name": "node src/cli/index.js --name",
+        "start:alice": "node src/cli/index.js --name Alice",
+        "start:bob": "node src/cli/index.js --name Bob --port 9002",
+        "matrix": "node src/cli/index.js --name Neo",
+        "ghost": "node src/cli/index.js --name Ghost"
     },
     "keywords": [
         "chat",

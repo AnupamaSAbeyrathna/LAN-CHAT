@@ -4,12 +4,12 @@
  * launch.js — Open CLIChatter in a New Terminal Window
  *
  * Detects the available terminal emulator and spawns
- * `node src/index.js [args]` in a new window.
+ * `node src/cli/index.js [args]` in a new window.
  *
  * Priority:  gnome-terminal → konsole → xfce4-terminal → xterm → macOS Terminal
  *
  * Usage:
- *   node src/launch.js --name Alice --room dev
+ *   node src/cli/launch.js --name Alice --room dev
  *   npm run new -- --name Alice --room dev
  */
 
@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(__dirname, '../..');
 const ENTRY = path.join(__dirname, 'index.js');
 
 // Pass through all args after this script's name

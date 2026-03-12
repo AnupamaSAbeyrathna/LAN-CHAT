@@ -12,7 +12,7 @@
 import dgram from 'dgram';
 import crypto from 'crypto';
 import os from 'os';
-import { upsertPeer, expireOldPeers } from './peers.js';
+import { upsertPeer, expireOldPeers } from '../core/peers.js';
 
 export const UDP_PORT = 9000;
 const ANNOUNCE_INTERVAL_MS = 3_000;

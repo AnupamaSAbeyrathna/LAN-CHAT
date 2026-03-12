@@ -9,7 +9,7 @@ A zero-config, peer-to-peer CLI chat app for machines on the same WiFi network.
 
 ```bash
 npm install
-node src/index.js --name Alice --room dev
+node src/cli/index.js --name Alice --room dev
 ```
 
 Everyone in the same room auto-discovers each other within a few seconds.  
@@ -21,14 +21,14 @@ The **room creator** approves joiners before the encrypted key is shared.
 
 ```bash
 # Basic
-node src/index.js --name Alice --room dev
+node src/cli/index.js --name Alice --room dev
 
 # Open in a NEW terminal window automatically
 npm run new -- --name Alice --room dev
 
 # Same-machine testing (two terminals)
-node src/index.js --name Alice --room dev
-node src/index.js --name Bob --port 9002 --room dev
+node src/cli/index.js --name Alice --room dev
+node src/cli/index.js --name Bob --port 9002 --room dev
 ```
 
 > **Tip:** Omit `--room` to get an interactive prompt asking for the room name.
@@ -40,6 +40,7 @@ node src/index.js --name Bob --port 9002 --room dev
 | Command | Description |
 |---|---|
 | `/list` | Show all online peers in the room (including yourself) |
+| `/self` | Show your current identity (IP/port/room/security) |
 | `/msg <name> <text>` | Direct message a peer |
 | `/ping [name]` | Health-check peer(s) with round-trip latency |
 | `/status` | Show room info, peer count, uptime, encryption state |
@@ -113,10 +114,13 @@ A persistent status line is shown below the prompt and updates every 3 seconds:
 
 | npm script | What it does |
 |---|---|
-| `npm start` | Start (prompts for name/room) |
-| `npm run new -- --name Alice --room dev` | Open in a **new terminal window** |
+| `npm start` | Start LAN Chat |
+| `npm run new -- --name Alice --room dev` | Start in a **new terminal window** (when supported) |
+| `npm run start:name -- --name Alice --room dev` | Start with a custom name (plus any other args) |
 | `npm run start:alice` | Quick-start as Alice |
 | `npm run start:bob` | Quick-start as Bob on port 9002 |
+| `npm run matrix` | Quick-start as Neo |
+| `npm run ghost` | Quick-start as Ghost |
 
 ---
 

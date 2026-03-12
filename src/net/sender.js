@@ -12,8 +12,8 @@
  */
 
 import net from 'net';
-import * as ui from './ui.js';
-import { encrypt, keyToHex } from './crypto.js';
+import * as ui from '../ui/ui.js';
+import { encrypt, keyToHex } from '../security/crypto.js';
 
 // Shared room key — set by index.js after key exchange
 let _roomKey = null;

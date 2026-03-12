@@ -253,6 +253,7 @@ export function printHelp() {
   print(chalk.dim('  ' + '─'.repeat(40)));
   const cmds = [
     ['/list', 'Show all online peers (includes you)'],
+    ['/self', 'Show your current identity (IP/port/room/security)'],
     ['/msg <name> <text>', 'Send a direct message'],
     ['/ping [name]', 'Check peer latency (omit name = all)'],
     ['/status', 'Show room status'],
@@ -263,6 +264,33 @@ export function printHelp() {
   ];
   for (const [cmd, desc] of cmds) {
     print(`  ${chalk.cyan(cmd.padEnd(22))} ${chalk.dim(desc)}`);
+  }
+  print('');
+}
+
+// ── /self output ───────────────────────────────────────────────────────────────
+export function printSelf(info) {
+  const {
+    name = _myName,
+    room = _room,
+    ip = _myIP,
+    port = _myPort,
+    role = 'Member',
+    encrypted = _encrypted,
+    keyFingerprint = null,
+  } = info || {};
+
+  print('');
+  print(`  ${chalk.bold('You')}`);
+  print(chalk.dim('  ' + '─'.repeat(40)));
+  print(`  ${chalk.dim('Name:')}     ${peerColor(name).bold(name)} ${chalk.dim(`(${role})`)}`);
+  print(`  ${chalk.dim('Room:')}     ${chalk.cyan('#' + room)}`);
+  print(`  ${chalk.dim('Address:')}  ${chalk.white(`${ip}:${port}`)}`);
+  if (encrypted) {
+    const fp = keyFingerprint ? chalk.dim(` (${keyFingerprint})`) : '';
+    print(`  ${chalk.dim('Security:')} ${chalk.green('● E2E encrypted 🔒')}${fp}`);
+  } else {
+    print(`  ${chalk.dim('Security:')} ${chalk.yellow('◌ Unencrypted (waiting for key exchange)')}`);
   }
   print('');
 }
