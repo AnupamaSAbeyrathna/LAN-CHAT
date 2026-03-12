@@ -16,18 +16,18 @@
 import readline from 'readline';
 import os from 'os';
 import { parseArgs } from 'node:util';
-import { startServer, setRoomKey as serverSetKey } from './server.js';
-import { startDiscovery } from './discovery.js';
-import { getAllPeers, upsertPeer } from './peers.js';
+import { startServer, setRoomKey as serverSetKey } from '../net/server.js';
+import { startDiscovery } from '../net/discovery.js';
+import { getAllPeers, upsertPeer } from '../core/peers.js';
 import {
   sendMessage, broadcastMessage, sendLeave,
   sendJoinRequest, sendKeyGrant, sendNuke, pingPeer,
   setRoomKey as senderSetKey,
-} from './sender.js';
-import * as ui from './ui.js';
+} from '../net/sender.js';
+import * as ui from '../ui/ui.js';
 import {
   generateRoomKey, fingerprint, hexToKey, decrypt,
-} from './crypto.js';
+} from '../security/crypto.js';
 
 // ── Parse CLI args ────────────────────────────────────────────────────────────
 const { values: cliArgs } = parseArgs({
@@ -46,7 +46,7 @@ let myRoom = (cliArgs.room || '').toLowerCase().trim();
 // ── Validate name ─────────────────────────────────────────────────────────────
 if (!myName || myName.trim().length === 0 || myName.length > 32) {
   console.error('  ✖ Name must be 1–32 non-empty characters.');
-  console.error('    Usage: node src/index.js --name <YourName>');
+  console.error('    Usage: node src/cli/index.js --name <YourName>');
   process.exit(1);
 }
 if (/[^\w\-.]/.test(myName)) {
@@ -85,7 +85,7 @@ function isValidRoom(r) {
 }
 
 // ── Tab completer ─────────────────────────────────────────────────────────────
-const BASE_COMMANDS = ['/list', '/msg ', '/ping ', '/status', '/nuke', '/help', '/quit'];
+const BASE_COMMANDS = ['/list', '/self', '/msg ', '/ping ', '/status', '/nuke', '/help', '/quit'];
 
 function tabCompleter(line) {
   if (line.startsWith('/msg ') || line.startsWith('/ping ')) {
@@ -314,17 +314,33 @@ rl.on('line', async (line) => {
   } else if (input === '/status') {
     ui.printStatus(getAllPeers());
 
+    // ── /self ────────────────────────────────────────────────────────────────
+  } else if (input === '/self') {
+    ui.printSelf({
+      name: myName,
+      room: myRoom,
+      ip: myIP,
+      port: myTcpPort,
+      role: isCreator ? 'Creator' : 'Member',
+      encrypted: !!roomKey,
+      keyFingerprint: roomKey ? fingerprint(roomKey) : null,
+    });
+
     // ── /nuke ─────────────────────────────────────────────────────────────────
   } else if (input === '/nuke') {
-    const peers = getAllPeers();
-    if (peers.length === 0) {
-      ui.printSystem('No peers to nuke.', 'warn');
+    if (!isCreator) {
+      ui.printSystem('⛔ Only the room creator can use /nuke.', 'error');
     } else {
-      ui.printSystem('💥 Nuking all peers...', 'warn');
-      await Promise.allSettled(
-        peers.map((p) => sendNuke(p.ip, p.port, myName, myTcpPort)),
-      );
-      await quit(false);
+      const peers = getAllPeers();
+      if (peers.length === 0) {
+        ui.printSystem('No peers to nuke.', 'warn');
+      } else {
+        ui.printSystem('💥 Nuking all peers...', 'warn');
+        await Promise.allSettled(
+          peers.map((p) => sendNuke(p.ip, p.port, myName, myTcpPort)),
+        );
+        await quit(false);
+      }
     }
 
     // ── /ping [name] ──────────────────────────────────────────────────────────

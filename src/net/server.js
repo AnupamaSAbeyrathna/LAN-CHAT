@@ -16,9 +16,9 @@
  */
 
 import net from 'net';
-import { removePeer } from './peers.js';
-import * as ui from './ui.js';
-import { sanitize } from './crypto.js';
+import { removePeer } from '../core/peers.js';
+import * as ui from '../ui/ui.js';
+import { sanitize } from '../security/crypto.js';
 
 const MAX_PACKET_SIZE = 64 * 1024;
 
@@ -89,7 +89,7 @@ export function startServer(
     if (err.code === 'EADDRINUSE') {
       console.error(
         `\n  ✖ Port ${tcpPort} is already in use.\n` +
-        `    Try: node src/index.js --name <Name> --port <other port>\n`,
+        `    Try: node src/cli/index.js --name <Name> --port <other port>\n`,
       );
       process.exit(1);
     }
